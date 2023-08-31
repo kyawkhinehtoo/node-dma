@@ -4,6 +4,8 @@ const path = require('path');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const indexRouter = require('./router.js');
+const md5 = require('md5');
+
 require( 'console-stamp' )( console );
 const app = express();
 

@@ -318,6 +318,7 @@ router.post('/disable', accountValidation, (req, res, next) => {
         return res.send({ error: false, data: results, message: 'Fetch Successfully.' });
     });
 });
+
 router.post('/data', accountValidation, (req, res, next) => {
   console.log(req.body);
     if(
@@ -353,7 +354,18 @@ router.post('/data', accountValidation, (req, res, next) => {
         return res.send({ error: false, data: results, message: 'User Updated Successfully.' });
     });
 });
-router.post('/create', createValidation, (req, res, next) => {
+async function executeQuery(query, args) {
+  return new Promise((resolve, reject) => {
+    db.query(query, args, (error, results) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(results);
+      }
+    });
+  });
+}
+router.post('/create', createValidation, async (req, res, next) => {
   console.log(req.body);
   if(
         !req.headers.authorization ||
@@ -367,9 +379,11 @@ router.post('/create', createValidation, (req, res, next) => {
   
     const theToken = req.headers.authorization.split(' ')[1];
     const decoded = jwt.verify(theToken, 'the-super-strong-secrect');
-  let args = {
+    const hashedPassword = md5(req.body.password);
+
+  let args1 = {
     'username':req.body.username,
-    'password':req.body.password, 
+    'password':hashedPassword, 
     'groupid': req.body.groupid,
     'enableuser':req.body.enableuser, 
     'uplimit':req.body.uplimit, 
@@ -427,16 +441,55 @@ router.post('/create', createValidation, (req, res, next) => {
     'contractid':'',
     'actcode':'',
     };
-    if(typeof req.body.srvid !== 'undefined'){
-      args.srvid = req.body.srvid;
-    }
 
-    db.query('insert into rm_users SET ?', args,function (error, results) {
-      if (error)
-        throw error;
-        return res.send({ error: false, data: results, message: 'User Created Successfully.' });
-    });
+    if(typeof req.body.srvid !== 'undefined'){
+      args1.srvid = req.body.srvid;
+    }
+    let args2 = {
+      'username':req.body.username,
+      'attribute':'Cleartext-Password',
+      'op':':=',
+      'value':req.body.password, 
+    };
+    let args3 = {
+      'username':req.body.username,
+      'attribute':'Simultaneous-Use',
+      'op':':=',
+      'value':'1', 
+    };
+
+    const query1 = 'insert into rm_users SET ?';
+    const query2 = 'insert into radcheck SET ?';
+    const query3 = 'insert into radcheck SET ?';
+    try {
+      
+    //   const [result1, result2, result3] = await Promise.all([
+    //     executeQuery(query1, args1),
+    //     executeQuery(query2, args2),
+    //     executeQuery(query3, args3)
+    // ]);
+    const result1 = await executeQuery(query1, args1);
+
+    const check1 = await executeQuery('SELECT * FROM radcheck WHERE username = ? and attribute= ?', [args2.username, args2.attribute]);
+    console.log('Result from query 1:', result1);
+    if (check1.length  == 0) {
+     const result2 =  await executeQuery(query2, args2);
+     console.log('Result from query 2:', result2);
+    }
+    const check2 = await executeQuery('SELECT * FROM radcheck WHERE username = ? and attribute= ?', [args3.username, args3.attribute]);
+    if (check2.length  == 0) {
+     const result3 =  await executeQuery(query2, args3);
+     console.log('Result from query 3:', result3);
+    }
+   return res.send({ error: false, data: result1, message: 'User Created Successfully.' });
+    } catch (error) {
+      console.error('Error creating user:', error);
+      return res.status(500).json({ error: true, message: 'An error occurred while creating the user.' });
+    }
+ 
 });
+
+
 router.post('/update', updateValidation, (req, res, next) => {
   console.log('updating user');
   console.log(req.body);
@@ -458,6 +511,7 @@ router.post('/update', updateValidation, (req, res, next) => {
   
     const theToken = req.headers.authorization.split(' ')[1];
     const decoded = jwt.verify(theToken, 'the-super-strong-secrect');
+    
   let args = [
     req.body.username,
     req.body.groupid,
@@ -495,7 +549,8 @@ router.post('/update', updateValidation, (req, res, next) => {
       sql += ', srvid =? ';
   }
   if(typeof req.body.password !== 'undefined'){
-    args.push(req.body.password);
+    const hashedPassword = md5(req.body.password);
+    args.push(hashedPassword);
     sql += ', password =? ';
 }
   args.push(req.body.username);
