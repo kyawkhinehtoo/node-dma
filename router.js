@@ -493,6 +493,16 @@ router.post("/data", accountValidation, async (req, res, next) => {
         );
       }
     }
+    // Check disable user
+    if (req.body.enableuser) {
+      if (req.body.enableuser == 0) {
+        // Call disconnectUser if expiration date is before today
+        await disconnectUser(req.body.username, nasIp, sharedSecret);
+        console.log(
+          `User ${req.body.username} disconnected due to user suspense or terminate.`
+        );
+      }
+    }
 
     return res.send({
       error: false,
