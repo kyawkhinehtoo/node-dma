@@ -36,8 +36,8 @@ function disconnectUser(username, nasIp, sharedSecret) {
   });
 }
 
-cron.schedule("0 1 * * *", async () => {
-  console.log("Running daily expiration check at midnight...");
+cron.schedule("0 6 * * *", async () => {
+  console.log("Running daily expiration check at 6 A.M ...");
 
   try {
     // Query to get users with expiration dates that have passed
@@ -389,6 +389,7 @@ router.post("/enable", accountValidation, (req, res, next) => {
   let sql = `UPDATE rm_users SET enableuser=1 WHERE username = ? `;
   db.query(sql, req.body.pppoe_account, function (error, results, fields) {
     if (error) throw error;
+    console.log(req.body.pppoe_account + " has been enabled.");
     return res.send({
       error: false,
       data: results,
@@ -421,6 +422,8 @@ router.post("/disable", accountValidation, (req, res, next) => {
       return res
         .status(500)
         .json({ message: "Database error occurred", error });
+    } else {
+      console.log(req.body.pppoe_account + " has been disabled.");
     }
 
     try {
@@ -439,7 +442,51 @@ router.post("/disable", accountValidation, (req, res, next) => {
     }
   });
 });
+router.post("/delete", accountValidation, (req, res, next) => {
+  console.log(req.body);
+  if (
+    !req.headers.authorization ||
+    !req.headers.authorization.startsWith("Bearer") ||
+    !req.headers.authorization.split(" ")[1]
+  ) {
+    return res.status(422).json({
+      message: "Please provide the token",
+    });
+  }
 
+  const theToken = req.headers.authorization.split(" ")[1];
+  const decoded = jwt.verify(
+    theToken,
+    process.env.JWT_SECRET || "the-super-strong-secrect"
+  );
+
+  const sql = `DELETE FROM rm_users WHERE username = ?`;
+  db.query(sql, req.body.pppoe_account, async (error, results, fields) => {
+    if (error) {
+      console.error("Database Error:", error);
+      return res
+        .status(500)
+        .json({ message: "Database error occurred", error });
+    } else {
+      console.log(req.body.pppoe_account + " has been deleted from Radius");
+    }
+
+    try {
+      disconnectUser(req.body.pppoe_account, nasIp, sharedSecret);
+      return res.send({
+        error: false,
+        data: results,
+        message: "User disabled and disconnected successfully.",
+      });
+    } catch (disconnectError) {
+      console.error("Disconnect Error:", disconnectError);
+      return res.status(500).json({
+        message: "Failed to disconnect user",
+        error: disconnectError,
+      });
+    }
+  });
+});
 router.post("/data", accountValidation, async (req, res, next) => {
   console.log(req.body);
 
