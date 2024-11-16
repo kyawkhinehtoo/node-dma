@@ -773,6 +773,25 @@ router.post("/update", updateValidation, (req, res, next) => {
     const hashedPassword = md5(req.body.password);
     args.push(hashedPassword);
     sql += ", password =? ";
+    // Update the radcheck table
+    const radcheckSql = `
+  UPDATE radcheck 
+  SET value = ? 
+  WHERE username = ? AND attribute = "Cleartext-Password"
+`;
+    db.query(
+      radcheckSql,
+      [req.body.password, req.body.username],
+      (radError, radResults) => {
+        if (radError) {
+          console.error("Error updating radcheck table:", radError);
+          return res
+            .status(500)
+            .json({ error: true, message: "Error updating radcheck table" });
+        }
+        console.log("Radcheck updated:", radResults);
+      }
+    );
   }
   args.push(req.body.username);
   sql += "where username =? ";
