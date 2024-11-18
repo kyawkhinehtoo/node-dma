@@ -42,6 +42,9 @@ cron.schedule("0 6 * * *", async () => {
   try {
     // Query to get users with expiration dates that have passed
     const expiredUsers = await new Promise((resolve, reject) => {
+      //expiration 17
+      //CURDATE()  = 18
+
       const sql =
         "SELECT username FROM rm_users WHERE expiration < CURDATE() AND enableuser = 1";
       db.query(sql, (error, results) => {
@@ -315,7 +318,7 @@ router.post("/check-online", accountValidation, (req, res, next) => {
 
       //check expired
       db.query(
-        "SELECT * FROM rm_users WHERE username = ? and expiration < NOW() and enableuser = 1",
+        "SELECT * FROM rm_users WHERE username = ? and expiration < CURDATE() and enableuser = 1",
         req.body.pppoe_account,
         function (error, results, fields) {
           if (error) throw error;
@@ -712,14 +715,13 @@ router.post("/create", createValidation, async (req, res, next) => {
 });
 
 router.post("/update", updateValidation, (req, res, next) => {
-  console.log("updating user");
+  console.log("Updating user");
   console.log(req.body);
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     console.log(errors.array());
     return res.status(400).json({ errors: errors.array() });
   }
-
   if (
     !req.headers.authorization ||
     !req.headers.authorization.startsWith("Bearer") ||
@@ -729,11 +731,9 @@ router.post("/update", updateValidation, (req, res, next) => {
       message: "Please provide the token",
     });
   }
-
   const theToken = req.headers.authorization.split(" ")[1];
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
-
-  let args = [
+  const args = [
     req.body.username,
     req.body.groupid,
     req.body.enableuser,
@@ -749,61 +749,107 @@ router.post("/update", updateValidation, (req, res, next) => {
     req.body.zip,
   ];
 
-  let sql =
-    "update rm_users set " +
-    "username =?," +
-    "groupid =?," +
-    "enableuser =?," +
-    "firstname =?," +
-    "lastname =?," +
-    "phone =?," +
-    "mobile =?," +
-    "address =?," +
-    "city =?," +
-    "country =?," +
-    "gpslat =?," +
-    "gpslong =?," +
-    "zip =?";
+  let sql = `
+    UPDATE rm_users SET
+    username = ?, groupid = ?, enableuser = ?, firstname = ?,
+    lastname = ?, phone = ?, mobile = ?, address = ?, city = ?,
+    country = ?, gpslat = ?, gpslong = ?, zip = ?
+  `;
 
   if (typeof req.body.srvid !== "undefined") {
     args.push(req.body.srvid);
-    sql += ", srvid =? ";
+    sql += ", srvid = ?";
   }
+
+  const updateUser = () => {
+    args.push(req.body.username);
+    sql += " WHERE username = ?";
+
+    console.log("Final query:", sql);
+    db.query(sql, args, (error, results) => {
+      if (error) {
+        console.error("Error updating user:", error);
+        return res.status(500).json({
+          error: true,
+          message: "Database error while updating user",
+        });
+      }
+
+      console.log("User updated successfully:", results);
+      res.json({
+        error: false,
+        data: results,
+        message: "User updated successfully.",
+      });
+    });
+  };
+
   if (typeof req.body.password !== "undefined") {
     const hashedPassword = md5(req.body.password);
-    args.push(hashedPassword);
-    sql += ", password =? ";
-    // Update the radcheck table
-    const radcheckSql = `
-  UPDATE radcheck 
-  SET value = ? 
-  WHERE username = ? AND attribute = "Cleartext-Password"
-`;
+
+    const checkPasswordSql = `SELECT password FROM rm_users WHERE username = ?`;
     db.query(
-      radcheckSql,
-      [req.body.password, req.body.username],
-      (radError, radResults) => {
-        if (radError) {
-          console.error("Error updating radcheck table:", radError);
-          return res
-            .status(500)
-            .json({ error: true, message: "Error updating radcheck table" });
+      checkPasswordSql,
+      [req.body.username],
+      (checkError, checkResults) => {
+        if (checkError) {
+          console.error("Error fetching current password:", checkError);
+          return res.status(500).json({
+            error: true,
+            message: "Error fetching current password",
+          });
         }
-        console.log("Radcheck updated:", radResults);
+
+        if (checkResults.length > 0) {
+          const currentPassword = checkResults[0].password;
+          console.log("New Password : " + hashedPassword);
+          console.log("Cur Password : " + currentPassword);
+          if (hashedPassword === currentPassword) {
+            console.log("Password matches, no need to update");
+            return updateUser();
+          } else {
+            console.log("Updating password...");
+            args.push(hashedPassword);
+            sql += ", password = ?";
+
+            const radcheckSql = `
+            UPDATE radcheck 
+            SET value = ? 
+            WHERE username = ? AND attribute = "Cleartext-Password"
+          `;
+            db.query(
+              radcheckSql,
+              [req.body.password, req.body.username],
+              (radError, radResults) => {
+                if (radError) {
+                  console.error("Error updating radcheck table:", radError);
+                  return res.status(500).json({
+                    error: true,
+                    message: "Error updating radcheck table",
+                  });
+                }
+
+                console.log("Radcheck updated successfully:", radResults);
+                disconnectUser(req.body.username, nasIp, sharedSecret);
+                console.log(
+                  `User ${req.body.username} disconnected due to password update.`
+                );
+                updateUser();
+              }
+            );
+          }
+        } else {
+          console.warn("User not found in rm_users table");
+          return res.status(404).json({
+            error: true,
+            message: "User not found",
+          });
+        }
       }
     );
+  } else {
+    updateUser();
   }
-  args.push(req.body.username);
-  sql += "where username =? ";
-  db.query(sql, args, function (error, results) {
-    if (error) throw error;
-    console.log(results);
-    return res.send({
-      error: false,
-      data: results,
-      message: "User Updated Successfully.",
-    });
-  });
 });
 
 router.post("/get-online", signupValidation, (req, res, next) => {
@@ -821,7 +867,7 @@ router.post("/get-online", signupValidation, (req, res, next) => {
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
   console.log("expiration from = " + req.body.from);
   console.log("expiration to = " + req.body.to);
-  let sql = `SELECT rm_users.username FROM rm_users JOIN radacct ON rm_users.username = radacct.username WHERE rm_users.enableuser=1 AND radacct.acctstoptime is null AND rm_users.expiration > NOW() AND rm_users.expiration between ${db.escape(
+  let sql = `SELECT rm_users.username FROM rm_users JOIN radacct ON rm_users.username = radacct.username WHERE rm_users.enableuser=1 AND radacct.acctstoptime is null  AND rm_users.expiration between ${db.escape(
     req.body.from
   )}  and ${db.escape(req.body.to)} `;
   db.query(sql, function (error, results, fields) {
@@ -849,7 +895,7 @@ router.post("/get-offline", signupValidation, (req, res, next) => {
   console.log("expiration to = " + req.body.to);
   const theToken = req.headers.authorization.split(" ")[1];
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
-  let sql = `SELECT rm_users.username FROM rm_users WHERE rm_users.username NOT IN (SELECT rm_users.username FROM rm_users JOIN radacct ON rm_users.username = radacct.username WHERE rm_users.enableuser=1 AND radacct.acctstoptime is null) AND rm_users.enableuser=1 and  rm_users.expiration >= NOW() AND rm_users.expiration between ${db.escape(
+  let sql = `SELECT rm_users.username FROM rm_users WHERE rm_users.username NOT IN (SELECT rm_users.username FROM rm_users JOIN radacct ON rm_users.username = radacct.username WHERE rm_users.enableuser=1 AND radacct.acctstoptime is null) AND rm_users.enableuser=1 AND rm_users.expiration between ${db.escape(
     req.body.from
   )}  and ${db.escape(req.body.to)} `;
   db.query(sql, req.body.pppoe_account, function (error, results, fields) {
@@ -933,7 +979,7 @@ router.post("/get-expiry", signupValidation, (req, res, next) => {
   console.log("expiration to = " + req.body.to);
   const theToken = req.headers.authorization.split(" ")[1];
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
-  let sql = `SELECT username,expiration FROM rm_users WHERE  rm_users.expiration < NOW() AND rm_users.enableuser = 1 HAVING expiration between ${db.escape(
+  let sql = `SELECT username,expiration FROM rm_users WHERE  rm_users.expiration < CURDATE() AND rm_users.enableuser = 1 HAVING expiration between ${db.escape(
     req.body.from
   )}  and ${db.escape(req.body.to)}`;
   db.query(sql, req.body.pppoe_account, function (error, results, fields) {
@@ -947,7 +993,34 @@ router.post("/get-expiry", signupValidation, (req, res, next) => {
     }
   });
 });
-
+router.post("/get-expiry-all", signupValidation, (req, res, next) => {
+  if (
+    !req.headers.authorization ||
+    !req.headers.authorization.startsWith("Bearer") ||
+    !req.headers.authorization.split(" ")[1]
+  ) {
+    return res.status(422).json({
+      message: "Please provide the token",
+    });
+  }
+  console.log("expiration from = " + req.body.from);
+  console.log("expiration to = " + req.body.to);
+  const theToken = req.headers.authorization.split(" ")[1];
+  const decoded = jwt.verify(theToken, "the-super-strong-secrect");
+  let sql = `SELECT username,expiration FROM rm_users WHERE rm_users.enableuser = 1 HAVING expiration between ${db.escape(
+    req.body.from
+  )}  and ${db.escape(req.body.to)}`;
+  db.query(sql, req.body.pppoe_account, function (error, results, fields) {
+    if (error) {
+      throw error;
+    }
+    if (results.length > 0) {
+      return res.send({ error: false, data: results, message: "success" });
+    } else {
+      return res.send({ error: false, data: results, message: "no data" });
+    }
+  });
+});
 router.post("/get-active", signupValidation, (req, res, next) => {
   if (
     !req.headers.authorization ||
@@ -961,7 +1034,7 @@ router.post("/get-active", signupValidation, (req, res, next) => {
 
   const theToken = req.headers.authorization.split(" ")[1];
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
-  let sql = `SELECT username,expiration FROM rm_users WHERE  rm_users.expiration > NOW() AND rm_users.enableuser = 1`;
+  let sql = `SELECT username,expiration FROM rm_users WHERE  rm_users.expiration > CURDATE() AND rm_users.enableuser = 1`;
   db.query(sql, req.body.pppoe_account, function (error, results, fields) {
     if (error) {
       throw error;
