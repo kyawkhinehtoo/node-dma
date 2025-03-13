@@ -4,7 +4,7 @@ var db_config = {
   host: "localhost", // Replace with your host name
   user: "root", // Replace with your database username
   password: "", // Replace with your database password
-  database: "fip-radius", // // Replace with your database Name
+  database: "truenet_radius", // // Replace with your database Name
 };
 var pool;
 function handleDisconnect() {

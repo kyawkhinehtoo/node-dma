@@ -232,7 +232,7 @@ router.post("/get-all-account", signupValidation, (req, res, next) => {
   const theToken = req.headers.authorization.split(" ")[1];
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
 
-  db.query("SELECT username FROM rm_users", function (error, results) {
+  db.query("SELECT username,firstname,lastname,srvid,company,enableuser,phone,mobile,address,state,comment,gpslat,gpslong,expiration,email,custattr,contractid FROM rm_users", function (error, results) {
     if (error) throw error;
     return res.send({
       error: false,
@@ -282,7 +282,7 @@ router.post("/get-account", accountValidation, (req, res, next) => {
 
   const theToken = req.headers.authorization.split(" ")[1];
   const decoded = jwt.verify(theToken, "the-super-strong-secrect");
-  let sql = `SELECT u.username,u.srvid,u.enableuser,u.createdon,u.createdby,a.framedipaddress,a.acctstarttime,a.acctsessiontime,a.acctstoptime,a.callingstationid,u.expiration,s.srvname FROM rm_users u LEFT JOIN radacct a ON u.username = a.username JOIN rm_services s ON u.srvid = s.srvid WHERE u.username = ? ORDER BY a.acctstarttime DESC LIMIT 1`;
+  let sql = `SELECT u.username,u.srvid,u.enableuser,u.createdon,u.createdby,a.framedipaddress,a.acctstarttime,a.acctsessiontime,a.acctstoptime,a.callingstationid,u.expiration,s.srvname FROM rm_users u LEFT JOIN radacct a ON u.username = a.username LEFT JOIN rm_services s ON u.srvid = s.srvid WHERE u.username = ? ORDER BY a.acctstarttime DESC LIMIT 1`;
   db.query(sql, req.body.pppoe_account, function (error, results, fields) {
     if (error) throw error;
 
@@ -639,8 +639,10 @@ router.post("/create", createValidation, async (req, res, next) => {
     alertsms: req.body.alertsms,
     lang: req.body.lang,
     zip: req.body.zip,
-    macpswmode: 0,
-    autorenew: 0,
+  //  macpswmode: 0,
+  //  autorenew: 0,
+  //  qmailtime: new Date().toISOString().slice(0, 19).replace('T', ' '),
+  //  qmail:0,
     state: 0,
     comment: "",
     mac: "",
